@@ -1,0 +1,8 @@
+/* tailwind.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.control-btn {
+  @apply w-10 h-10 bg-gray-900 text-white rounded flex items-center justify-center;
+}
