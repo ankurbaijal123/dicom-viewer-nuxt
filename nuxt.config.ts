@@ -1,16 +1,11 @@
-// nuxt.config.ts
+import tailwindcss from "@tailwindcss/vite";
+
 export default defineNuxtConfig({
   ssr: false, // Only client-side rendering
 
   css: ['@/assets/css/tailwind.css', "@fortawesome/fontawesome-svg-core/styles.css"],
 
-  postcss: {
-  plugins: {
-    '@tailwindcss/postcss': {}, 
-    autoprefixer: {},
-  },
-},
-
+  devtools: { enabled: true },
   vite: {
     define: {
       'process.env': {}, // Prevent 'process is not defined' error
@@ -24,6 +19,9 @@ export default defineNuxtConfig({
         'dicom-parser',
       ],
     },
+     plugins: [
+      tailwindcss(),
+    ],
   },
 
   app: {

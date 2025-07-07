@@ -1,4 +1,6 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue';
+import type { Ref } from 'vue';
+
 import {
   annotation,
   LabelTool,
@@ -50,18 +52,13 @@ export function useLabelTool(
     labelInputVisible.value = true;
   };
 
-  onMounted(() => {
-    watch(cornerstoneElement, (el) => {
-      if (!el) return;
-      el.addEventListener('dblclick', handler);
-    }, { immediate: true });
-  });
-
-  onUnmounted(() => {
-    if (cornerstoneElement.value) {
-      cornerstoneElement.value.removeEventListener('dblclick', handler);
-    }
-  });
+  watch(cornerstoneElement, (el, _, onCleanup) => {
+    if (!el) return;
+    el.addEventListener('dblclick', handler);
+    onCleanup(() => {
+      el.removeEventListener('dblclick', handler);
+    });
+  }, { immediate: true });
 
   const onLabelSubmit = () => {
     const worldPos = currentWorldPosRef.value;
@@ -135,8 +132,8 @@ export function useLabelTool(
     labelInputVisible,
     labelInputCoords,
     labelInputValue,
-    setLabelInputValue: (val: string) => labelInputValue.value = val,
-    setLabelInputVisible: (val: boolean) => labelInputVisible.value = val,
+    setLabelInputValue: (val: string) => (labelInputValue.value = val),
+    setLabelInputVisible: (val: boolean) => (labelInputVisible.value = val),
     onLabelSubmit,
     onLabelCancel,
     prevToolRef,
