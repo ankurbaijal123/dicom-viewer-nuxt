@@ -2,7 +2,7 @@
 export default defineNuxtConfig({
   ssr: false, // Only client-side rendering
 
-  css: ['@/assets/css/tailwind.css'],
+  css: ['@/assets/css/tailwind.css', "@fortawesome/fontawesome-svg-core/styles.css"],
 
   postcss: {
   plugins: {

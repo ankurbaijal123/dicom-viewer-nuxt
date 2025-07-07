@@ -1,5 +1,4 @@
-// composables/useLabelTool.ts
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, onMounted, onUnmounted, watch } from 'vue';
 import {
   annotation,
   LabelTool,
@@ -14,82 +13,61 @@ export function useLabelTool(
   viewportId: string,
   toolGroupId: string,
   isMagnifyVisible: Ref<boolean>,
-  setIsMagnifyVisible: (visible: boolean) => void
+  setIsMagnifyVisible: (val: boolean) => void
 ) {
   const labelInputVisible = ref(false);
   const labelInputCoords = ref({ x: 0, y: 0 });
   const labelInputValue = ref('');
-  const currentWorldPos = ref<number[] | null>(null);
-  const currentImageId = ref<string | null>(null);
+  const currentWorldPosRef = ref<number[] | null>(null);
+  const currentImageIdRef = ref<string | null>(null);
+  const prevToolRef = ref<string | null>(null);
 
+  const handler = (event: MouseEvent) => {
+    const toolGroup = ToolGroupManager.getToolGroup(toolGroupId);
+    const viewport = renderingEngineRef.value?.getViewport(viewportId) as StackViewport;
+    if (!viewport || !toolGroup) return;
 
-
-const prevTool = ref<string | null>(null);
-
-  // Handler function ref so we can add/remove event listener
-  let handler: ((event: MouseEvent) => void) | null = null;
-
-  const addDoubleClickListener = () => {
-    if (!cornerstoneElement.value) return;
-
-    handler = (event: MouseEvent) => {
-      const toolGroup = ToolGroupManager.getToolGroup(toolGroupId);
-      const viewport = renderingEngineRef.value?.getViewport(viewportId) as StackViewport;
-      if (!viewport || !toolGroup) return;
-
-      if (isMagnifyVisible.value) {
-        prevTool.value = 'Magnifier';
-        setIsMagnifyVisible(false);
-      }
-
-      const canvas = viewport.getCanvas();
-      const rect = canvas.getBoundingClientRect();
-
-      const coords: [number, number] = [
-        event.clientX - rect.left,
-        event.clientY - rect.top,
-      ];
-
-      const worldPos = viewport.canvasToWorld(coords);
-      const imageId = viewport.getCurrentImageId();
-
-      currentWorldPos.value = worldPos;
-      currentImageId.value = imageId;
-
-      labelInputCoords.value = { x: event.clientX, y: event.clientY };
-      labelInputValue.value = '';
-      labelInputVisible.value = true;
-    };
-
-    cornerstoneElement.value.addEventListener('dblclick', handler);
-  };
-
-  const removeDoubleClickListener = () => {
-    if (cornerstoneElement.value && handler) {
-      cornerstoneElement.value.removeEventListener('dblclick', handler);
+    if (isMagnifyVisible.value) {
+      setIsMagnifyVisible(false);
     }
+
+    const canvas = viewport.getCanvas();
+    const rect = canvas.getBoundingClientRect();
+
+    const coords: [number, number] = [
+      event.clientX - rect.left,
+      event.clientY - rect.top,
+    ];
+
+    const worldPos = viewport.canvasToWorld(coords);
+    const imageId = viewport.getCurrentImageId();
+
+    currentWorldPosRef.value = worldPos;
+    currentImageIdRef.value = imageId;
+
+    labelInputCoords.value = { x: event.clientX, y: event.clientY };
+    labelInputValue.value = '';
+    labelInputVisible.value = true;
   };
 
   onMounted(() => {
-    addDoubleClickListener();
+    watch(cornerstoneElement, (el) => {
+      if (!el) return;
+      el.addEventListener('dblclick', handler);
+    }, { immediate: true });
   });
 
-  onBeforeUnmount(() => {
-    removeDoubleClickListener();
+  onUnmounted(() => {
+    if (cornerstoneElement.value) {
+      cornerstoneElement.value.removeEventListener('dblclick', handler);
+    }
   });
 
-  // Also watch cornerstoneElement in case it changes dynamically
-  watch(cornerstoneElement, (newVal, oldVal) => {
-    if (oldVal) oldVal.removeEventListener('dblclick', handler!);
-    if (newVal) newVal.addEventListener('dblclick', handler!);
-  });
-
-  function onLabelSubmit() {
-    const worldPos = currentWorldPos.value;
-    const imageId = currentImageId.value;
+  const onLabelSubmit = () => {
+    const worldPos = currentWorldPosRef.value;
+    const imageId = currentImageIdRef.value;
     const viewport = renderingEngineRef.value?.getViewport(viewportId);
     const toolGroup = ToolGroupManager.getToolGroup(toolGroupId);
-
     if (!labelInputValue.value || !imageId || !worldPos || !viewport || !toolGroup) return;
 
     annotation.state.addAnnotation(
@@ -117,40 +95,50 @@ const prevTool = ref<string | null>(null);
 
     toolGroup.setToolPassive(LabelTool.toolName);
 
-    if (prevTool.value === 'Magnifier') {
-      setIsMagnifyVisible(true);
-    } else {
-      const previousTool = prevTool.value;
-      if (previousTool && previousTool !== LabelTool.toolName) {
-        toolGroup.setToolActive(previousTool, {
-          bindings: [{ mouseButton: csToolsEnums.MouseBindings.Primary }],
-        });
+    const previousTool = prevToolRef.value;
+    if (previousTool !== null) {
+      if (
+        ['Length', 'RectangleROI', 'EllipticalROI', 'Angle', 'Label'].includes(previousTool) &&
+        isMagnifyVisible.value === false
+      ) {
+        setIsMagnifyVisible(true);
+      } else if (
+        isMagnifyVisible.value &&
+        ['Pan', 'Zoom', 'WindowLevel'].includes(previousTool)
+      ) {
+        setIsMagnifyVisible(false);
       }
+    }
+
+    if (previousTool && previousTool !== LabelTool.toolName) {
+      toolGroup.setToolActive(previousTool, {
+        bindings: [{ mouseButton: csToolsEnums.MouseBindings.Primary }],
+      });
     }
 
     viewport.render();
     labelInputVisible.value = false;
     labelInputValue.value = '';
-    prevTool.value = null;
-  }
+    prevToolRef.value = null;
+  };
 
-  function onLabelCancel() {
-    if (prevTool.value === 'Magnifier') {
+  const onLabelCancel = () => {
+    if (prevToolRef.value === 'Magnifier') {
       setIsMagnifyVisible(true);
     }
 
     labelInputVisible.value = false;
-    prevTool.value = null;
-  }
+    prevToolRef.value = null;
+  };
 
   return {
     labelInputVisible,
     labelInputCoords,
     labelInputValue,
-    setLabelInputValue: (val: string) => (labelInputValue.value = val),
+    setLabelInputValue: (val: string) => labelInputValue.value = val,
+    setLabelInputVisible: (val: boolean) => labelInputVisible.value = val,
     onLabelSubmit,
     onLabelCancel,
-    setLabelInputVisible: (val: boolean) => (labelInputVisible.value = val),
-    prevTool,
+    prevToolRef,
   };
 }

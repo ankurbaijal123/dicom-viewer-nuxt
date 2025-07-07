@@ -1,15 +1,11 @@
-import { defineNuxtPlugin } from '#app'
-import { library } from '@fortawesome/fontawesome-svg-core'
-import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
-import {
-  faStepBackward,
-  faPlay,
-  faPause,
-  faStepForward,
-} from '@fortawesome/free-solid-svg-icons'
+import { library } from "@fortawesome/fontawesome-svg-core";
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 
-library.add(faStepBackward, faPlay, faPause, faStepForward)
+// Import specific icons you want to use:
+import { faPlay, faPause, faStepBackward, faStepForward } from "@fortawesome/free-solid-svg-icons";
+
+library.add(faPlay, faPause, faStepBackward, faStepForward);
 
 export default defineNuxtPlugin((nuxtApp) => {
-  nuxtApp.vueApp.component('FontAwesomeIcon', FontAwesomeIcon)
-})
+  nuxtApp.vueApp.component("FontAwesomeIcon", FontAwesomeIcon);
+});

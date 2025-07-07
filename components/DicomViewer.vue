@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from "vue";
+import { ref, onMounted, onBeforeUnmount } from "vue";
+
+
 import {
   RenderingEngine,
   Enums,
@@ -25,45 +27,41 @@ import {
   LabelTool,
 } from "@cornerstonejs/tools";
 
-import hardcodedMetaDataProvider from "@/utils/hardcodedMetaDataProvider";
-import {useLabelTool} from "@/composables/useLabelTool";
-import {useMagnifier} from "@/composables/useMagnifier";
-import ViewportComponent from "~/components/ViewportComponent.vue";
+import hardcodedMetaDataProvider from "~/utils/hardcodedMetaDataProvider";
+import { useLabelTool } from "~/composables/useLabelTool";
 import LabelInputOverlay from "~/components/LabelInputOverlay.vue";
+import { useMagnifier } from "~/composables/useMagnifier";
+import ViewportComponent from "~/components/ViewportComponent.vue";
+
+
 
 const renderingEngineId = "myRenderingEngine";
 const viewportId = "myViewport";
 const toolGroupId = "myToolGroup";
 
-// Refs and reactive state
 const elementRef = ref<HTMLDivElement | null>(null);
-const loaded = ref(false);
 const renderingEngineRef = ref<RenderingEngine | null>(null);
+
+const loaded = ref(false);
 const frameIndex = ref(0);
 const frameCount = ref(1);
 const isPlaying = ref(false);
 const isMagnifyVisible = ref(false);
 const speed = ref(1);
-const playIntervalRef = ref<NodeJS.Timeout | null>(null);
-const cornerstoneElement = ref<HTMLElement | null>(null);
 const zoomFactor = ref(2);
 
-const setIsMagnifyVisible = (val: boolean) => {
-  isMagnifyVisible.value = val;
-};
+let playInterval: ReturnType<typeof setInterval> | null = null;
 
 
-// Set cornerstoneElement after mount
-onMounted(() => {
-  cornerstoneElement.value = document.getElementById("cornerstoneDiv");
-});
+const cornerstoneElement = ref<HTMLElement | null>(null);
 
 const fetchDicomFile = async () => {
-  const response = await fetch("/dicom_1.dcm");
-  console.log("Fetching DICOM file status:", response.status);
-  if (!response.ok) throw new Error("Failed to fetch DICOM file");
+  const response = await fetch(window.location.origin + '/ultrasound.dcm');
+
+  console.log("Response status:", response.status);
   return await response.blob();
 };
+
 
 
 const handleFlip = (type: "HFlip" | "VFlip") => {
@@ -79,8 +77,9 @@ const handleFlip = (type: "HFlip" | "VFlip") => {
   viewport.render();
 };
 
-// Initialize cornerstone and tools
 onMounted(async () => {
+  cornerstoneElement.value = document.getElementById("cornerstoneDiv");
+
   try {
     const { init: dicomLoaderInit, wadouri } = await import("@cornerstonejs/dicom-image-loader");
     await cornerstoneCoreInit();
@@ -107,14 +106,11 @@ onMounted(async () => {
 
     const viewport = renderingEngine.getViewport(viewportId) as StackViewport;
     const imageBlob = await fetchDicomFile();
-    console.log("Fetched DICOM file:", imageBlob);
     const baseImageId = wadouri.fileManager.add(imageBlob);
 
     await imageLoader.loadImage(baseImageId);
-
     const metadata = metaData.get("multiframeModule", baseImageId);
     const numberOfFrames = metadata?.NumberOfFrames;
-
     if (numberOfFrames) {
       frameCount.value = numberOfFrames;
 
@@ -124,11 +120,10 @@ onMounted(async () => {
       }
 
       await viewport.setStack(imageIds);
-      viewport.setImageIdIndex(0); // start at first frame
+      viewport.setImageIdIndex(1);
     } else {
       await viewport.setStack([baseImageId]);
     }
-
     viewport.render();
 
     [
@@ -144,7 +139,6 @@ onMounted(async () => {
 
     const toolGroup = ToolGroupManager.createToolGroup(toolGroupId);
     if (!toolGroup) return;
-
     [
       PanTool,
       ZoomTool,
@@ -157,42 +151,33 @@ onMounted(async () => {
     ].forEach((Tool) => {
       toolGroup.addTool(Tool.toolName);
     });
-
     toolGroup.addViewport(viewportId, renderingEngineId);
 
     loaded.value = true;
   } catch (error) {
-    console.error("Initialization error:", error);
-    alert("Runtime Error:\n" + JSON.stringify(error, null, 2));
+    console.error("Error initializing Cornerstone:", error);
   }
 });
 
-watch(isPlaying, (newVal) => {
-  if (!newVal) {
-    if (playIntervalRef.value) clearInterval(playIntervalRef.value);
-    return;
-  }
+const {
+  labelInputVisible,
+  labelInputCoords,
+  labelInputValue,
+  setLabelInputValue,
+  onLabelSubmit,
+  setLabelInputVisible,
+  prevToolRef,
+  onLabelCancel,
+} = useLabelTool(
+  cornerstoneElement,
+  renderingEngineRef,
+  viewportId,
+  toolGroupId,
+  isMagnifyVisible,
+  (v) => (isMagnifyVisible.value = v)
+);
 
-  playIntervalRef.value = setInterval(() => {
-    frameIndex.value = (prevIndex => {
-      if (prevIndex + 1 >= frameCount.value) {
-        isPlaying.value = false;
-        return 0;
-      }
-      const nextIndex = prevIndex + 1;
-      const viewport = renderingEngineRef.value?.getViewport(viewportId) as StackViewport;
-      if (viewport) {
-        viewport.setImageIdIndex(nextIndex);
-        viewport.render();
-      }
-      return nextIndex;
-    })(frameIndex.value);
-  }, (1000 / 30) / speed.value);
-});
-
-onBeforeUnmount(() => {
-  if (playIntervalRef.value) clearInterval(playIntervalRef.value);
-});
+useMagnifier(isMagnifyVisible, elementRef, renderingEngineRef, viewportId, zoomFactor);
 
 const handlePlay = () => {
   if (!isPlaying.value) isPlaying.value = true;
@@ -206,11 +191,22 @@ const handleSpeedChange = (num: number) => {
   speed.value = num;
 };
 
+
+
 const handleToolChange = (selectedToolName: string) => {
-  prevTool.value = selectedToolName;
-  if (isMagnifyVisible.value) {
+  prevToolRef.value = selectedToolName;
+  if (
+    ["Length", "RectangleROI", "EllipticalROI", "Angle", "Label"].includes(selectedToolName) &&
+    !isMagnifyVisible.value
+  ) {
+    isMagnifyVisible.value = true;
+  } else if (
+    isMagnifyVisible.value &&
+    ["Pan", "Zoom", "WindowLevel"].includes(selectedToolName)
+  ) {
     isMagnifyVisible.value = false;
   }
+
   const toolGroup = ToolGroupManager.getToolGroup(toolGroupId);
   if (!toolGroup) return;
 
@@ -224,7 +220,6 @@ const handleToolChange = (selectedToolName: string) => {
     AngleTool.toolName,
     LabelTool.toolName,
   ];
-
   allTools.forEach((toolName) => {
     if (toolName === selectedToolName) {
       toolGroup.setToolActive(toolName, {
@@ -240,26 +235,45 @@ const handleToolChange = (selectedToolName: string) => {
 };
 
 const handleFrameChange = (index: number) => {
+  if (index < 0 || index >= frameCount.value) return;
+
   const viewport = renderingEngineRef.value?.getViewport(viewportId) as StackViewport;
-  if (index >= 0 && index < frameCount.value && viewport) {
-    viewport.setImageIdIndex(index);
-    viewport.render();
-    frameIndex.value = index;
-  }
+  if (!viewport) return;
+
+  viewport.setImageIdIndex(index);
+  viewport.render();
+  frameIndex.value = index;
 };
 
-const {
-  labelInputVisible,
-  labelInputCoords,
-  labelInputValue,
-  setLabelInputValue,
-  onLabelSubmit,
-  setLabelInputVisible,
-  prevTool,
-  onLabelCancel,
-} = useLabelTool(cornerstoneElement, renderingEngineRef, viewportId, toolGroupId, isMagnifyVisible, setIsMagnifyVisible);
+watch(
+  () => isPlaying.value,
+  (playing) => {
+    if (!playing) {
+      if (playInterval) clearInterval(playInterval);
+      return;
+    }
 
-useMagnifier(isMagnifyVisible, elementRef, renderingEngineRef, viewportId, zoomFactor);
+    playInterval = setInterval(() => {
+  frameIndex.value = (frameIndex.value + 1) % frameCount.value;
+
+  if (frameIndex.value + 1 >= frameCount.value) {
+    isPlaying.value = false;
+    if (playInterval !== null) {
+      clearInterval(playInterval);
+      playInterval = null;
+    }
+  } else {
+    const viewport = renderingEngineRef.value?.getViewport(viewportId) as StackViewport;
+    viewport?.setImageIdIndex(frameIndex.value);
+    viewport?.render();
+  }
+}, (1000 / 30) / speed.value);
+  }
+);
+
+onBeforeUnmount(() => {
+  if (playInterval) clearInterval(playInterval);
+});
 </script>
 
 <template>
@@ -269,7 +283,15 @@ useMagnifier(isMagnifyVisible, elementRef, renderingEngineRef, viewportId, zoomF
 
       <div class="flex flex-wrap justify-center gap-3 mb-6">
         <button
-          v-for="Tool in [PanTool, ZoomTool, LengthTool, RectangleROITool, EllipticalROITool, AngleTool, WindowLevelTool]"
+          v-for="Tool in [
+            PanTool,
+            ZoomTool,
+            LengthTool,
+            RectangleROITool,
+            EllipticalROITool,
+            AngleTool,
+            WindowLevelTool,
+          ]"
           :key="Tool.toolName"
           @click="handleToolChange(Tool.toolName)"
           class="bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded text-sm shadow transition"
@@ -277,24 +299,11 @@ useMagnifier(isMagnifyVisible, elementRef, renderingEngineRef, viewportId, zoomF
           {{ Tool.toolName }}
         </button>
 
-        <button
-          @click="isMagnifyVisible = true"
-          class="bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded text-sm shadow transition"
-        >
-          Pan Zoom
-        </button>
-
-        <button
-          @click="handleFlip('VFlip')"
-          class="bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded text-sm shadow transition"
-        >
+        <button @click="handleFlip('VFlip')" class="bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded text-sm shadow transition">
           V Flip
         </button>
 
-        <button
-          @click="handleFlip('HFlip')"
-          class="bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded text-sm shadow transition"
-        >
+        <button @click="handleFlip('HFlip')" class="bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded text-sm shadow transition">
           H Flip
         </button>
       </div>
@@ -303,14 +312,14 @@ useMagnifier(isMagnifyVisible, elementRef, renderingEngineRef, viewportId, zoomF
         :elementRef="elementRef"
         :isMagnifyVisible="isMagnifyVisible"
         :zoomFactor="zoomFactor"
-        @update:zoomFactor="zoomFactor = $event"
+        @update:zoomFactor="(val) => (zoomFactor = val)"
       />
 
       <LabelInputOverlay
         :visible="labelInputVisible"
         :coords="labelInputCoords"
         :value="labelInputValue"
-        @update:value="setLabelInputValue"
+        @change="setLabelInputValue"
         @submit="onLabelSubmit"
         @close="onLabelCancel"
       />
@@ -320,15 +329,16 @@ useMagnifier(isMagnifyVisible, elementRef, renderingEngineRef, viewportId, zoomF
           type="range"
           :min="0"
           :max="frameCount > 1 ? frameCount - 1 : 0"
-          :value="frameIndex"
-          @input="handleFrameChange(Number($event.target.value))"
+          :value="frameCount > 1 ? frameIndex : 0"
+         @input="(e: Event) => handleFrameChange(Number((e.target as HTMLInputElement).value))"
+
           :disabled="frameCount <= 1"
-          :title="frameCount <= 1 ? 'Only available for multi-frame DICOM' : ''"
+          title="Only available for multi-frame DICOM"
           class="w-full appearance-none h-2 rounded-full bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
         />
         <div class="text-sm text-gray-300">
           <template v-if="frameCount > 1">
-            {{ ('00' + Math.floor(frameIndex / 30)).slice(-2) }}:{{ ('00' + (frameIndex % 30)).slice(-2) }}
+            {{ ("00" + Math.floor(frameIndex / 30)).slice(-2) }}:{{ ("00" + (frameIndex % 30)).slice(-2) }}
           </template>
           <template v-else>00:00</template>
         </div>
@@ -336,44 +346,24 @@ useMagnifier(isMagnifyVisible, elementRef, renderingEngineRef, viewportId, zoomF
 
       <div class="flex flex-wrap justify-center items-center gap-3 mb-3">
         <button
-          @click="handleFrameChange(frameIndex - 1)"
+          v-for="btn in [
+            { icon: 'FaStepBackward', onClick: () => handleFrameChange(frameIndex - 1), label: 'Previous Frame' },
+            { icon: 'FaPlay', onClick: handlePlay, label: 'Play' },
+            { icon: 'FaPause', onClick: handlePause, label: 'Pause' },
+            { icon: 'FaStepForward', onClick: () => handleFrameChange(frameIndex + 1), label: 'Next Frame' },
+          ]"
+          :key="btn.label"
+          @click="btn.onClick"
           :disabled="frameCount <= 1"
-          title="Previous Frame"
+          :title="btn.label"
           class="flex items-center justify-center w-10 h-10 bg-gray-900 border border-gray-700 rounded-md text-white hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition hover:scale-105 active:scale-95"
         >
-         
-          <FontAwesomeIcon icon="step-backward" />
+          <oh-vue-icon :name="btn.icon" />
         </button>
-        <button
-          @click="handlePlay"
-          :disabled="frameCount <= 1"
-          title="Play"
-          class="flex items-center justify-center w-10 h-10 bg-gray-900 border border-gray-700 rounded-md text-white hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition hover:scale-105 active:scale-95"
-        >
-        <FontAwesomeIcon icon="play" />
-        </button>
-        <button
-          @click="handlePause"
-          :disabled="frameCount <= 1"
-          title="Pause"
-          class="flex items-center justify-center w-10 h-10 bg-gray-900 border border-gray-700 rounded-md text-white hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition hover:scale-105 active:scale-95"
-        >
-
-           <FontAwesomeIcon icon="pause" />
-        </button>
-        <button
-          @click="handleFrameChange(frameIndex + 1)"
-          :disabled="frameCount <= 1"
-          title="Next Frame"
-          class="flex items-center justify-center w-10 h-10 bg-gray-900 border border-gray-700 rounded-md text-white hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition hover:scale-105 active:scale-95"
-        >
-          <FontAwesomeIcon icon="step-forward" />
-        </button>
-
         <select
           :disabled="frameCount <= 1"
-          v-model.number="speed"
-          class="flex items-center justify-center w-15 h-10 bg-gray-900 border border-gray-700 rounded-md text-white hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition"
+          v-model="speed"
+          class="flex items-center justify-center w-10 h-10 bg-gray-900 border border-gray-700 rounded-md text-white hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition"
         >
           <option value="0.5">0.5x</option>
           <option value="1">1x</option>
@@ -383,10 +373,7 @@ useMagnifier(isMagnifyVisible, elementRef, renderingEngineRef, viewportId, zoomF
       </div>
 
       <button
-        @click="() => {
-          const ann = annotation.state.getAllAnnotations();
-          console.log(ann);
-        }"
+        @click="() => console.log(annotation.state.getAllAnnotations())"
         class="bg-blue-600 hover:bg-blue-500 px-5 py-2 rounded text-sm font-semibold transition shadow"
       >
         Get Measurements
